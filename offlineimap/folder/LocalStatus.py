@@ -35,7 +35,7 @@ class LocalStatusFolder(BaseFolder):
         self.savelock = threading.Lock()
         self.doautosave = 1
         self.accountname = accountname
-        BaseFolder.__init__(self)
+        super(LocalStatusFolder, self).__init__()
 
     def getaccountname(self):
         return self.accountname

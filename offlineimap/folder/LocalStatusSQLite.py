@@ -15,122 +15,81 @@
 #    along with this program; if not, write to the Free Software
 #    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
-from Base import BaseFolder
-import os, threading
+from LocalStatus import LocalStatusFolder
+from threading import RLock
 
-from pysqlite2 import dbapi2 as sqlite
+try:
+    from pysqlite2 import dbapi2 as sqlite
+except:
+    pass #fail only when needed later on
 
-magicline = "OFFLINEIMAP LocalStatus CACHE DATA - DO NOT MODIFY - FORMAT 1"
-newmagicline = "OFFLINEIMAP LocalStatus NOW IN SQLITE, DO NOT MODIFY"
-
-class LocalStatusFolder(BaseFolder):
+class LocalStatusSQLiteFolder(LocalStatusFolder):
     """LocalStatus backend implemented with an SQLite database"""
     def __deinit__(self):
+        #TODO, need to invoke this when appropriate?
         self.save()
         self.cursor.close()
         self.connection.close()
 
     def __init__(self, root, name, repository, accountname, config):
-        self.name = name
-        self.root = root
-        self.sep = '.'
-        self.config = config
-        self.dofsync = config.getdefaultboolean("general", "fsync", True)
-        self.filename = repository.getfolderfilename(name)
-        self.messagelist = {}
-        self.repository = repository
-        self.savelock = threading.Lock()
-        self.doautosave = 1
-        self.accountname = accountname
-        BaseFolder.__init__(self)
-	self.dbfilename = self.filename + '.sqlite'
+        super(LocalStatusSQLiteFolder, self).__init__(root, name, repository, accountname, config)
+        
+        self.dblock = RLock()
+        """dblock protects against concurrent forbidden access of the db
+        object, e.g trying to test for existence and on-demand creation
+        of the db."""
 
-	# MIGRATE
-	if os.path.exists(self.filename):
-		self.connection = sqlite.connect(self.dbfilename)
-		self.cursor = self.connection.cursor()
-		self.cursor.execute('CREATE TABLE status (id INTEGER PRIMARY KEY, flags VARCHAR(50))')
-		if self.isnewfolder():
-                    self.messagelist = {}
-	            return
-	        file = open(self.filename, "rt")
-	        self.messagelist = {}
-	        line = file.readline().strip()
-	        assert(line == magicline)
-	        for line in file.xreadlines():
-	            line = line.strip()
-	            uid, flags = line.split(':')
-	            uid = long(uid)
-	            flags = [x for x in flags]
-		    flags.sort()
-	            flags = ''.join(flags)
-	            self.cursor.execute('INSERT INTO status (id,flags) VALUES (?,?)',
-				(uid,flags))
-	        file.close()
-		self.connection.commit()
-		os.rename(self.filename, self.filename + ".old")
-		self.cursor.close()
-		self.connection.close()
+        #Try to establish connection
+        try:
+            self.connection = sqlite.connect(self.filename)
+        except NameError:
+            # sqlite import had failed
+            raise UserWarning('SQLite backend chosen, but no sqlite python '
+                              'bindings available. Please install.')
 
-	# create new
-	if not os.path.exists(self.dbfilename):
-		self.connection = sqlite.connect(self.dbfilename)
-		self.cursor = self.connection.cursor()
-		self.cursor.execute('CREATE TABLE status (id INTEGER PRIMARY KEY, flags VARCHAR(50))')
-	else:
-		self.connection = sqlite.connect(self.dbfilename)
-		self.cursor = self.connection.cursor()
-
-
-
-    def getaccountname(self):
-        return self.accountname
-
-    def storesmessages(self):
-        return 0
+        #Test if the db version is current enough and if the db is
+        #readable.  Lock, so that only one thread at a time can do this,
+        #so we don't create them in parallel.
+        with self.dblock:
+            try:
+                self.cursor = self.connection.cursor()
+                self.cursor.execute('SELECT version from metadata')
+            except sqlite.DatabaseError:
+                #db file missing or corrupt, recreate it.
+                self.create_db()
 
     def isnewfolder(self):
-        return not os.path.exists(self.dbfilename)
+        # testing the existence of the db file won't work. It is created
+        # as soon as this class instance was intitiated. So say it is a
+        # new folder when there are no messages at all recorded in it.
+        return self.getmessagecount() > 0
 
-    def getname(self):
-        return self.name
-
-    def getroot(self):
-        return self.root
-
-    def getsep(self):
-        return self.sep
-
-    def getfullname(self):
-        return self.filename
+    def create_db(self):
+        """Create a new db file"""
+        self.ui.warn('Creating new Local Status db for %s:%s' \
+                         % (self.repository.getname(), self.getname()))
+        self.connection = sqlite.connect(self.filename)
+        self.cursor = self.connection.cursor()
+        self.cursor.execute('CREATE TABLE metadata (key VARCHAR(50) PRIMARY KEY, value VARCHAR(128))')
+        self.cursor.execute("INSERT INTO metadata VALUES('db_version', '1')")
+        self.cursor.execute('CREATE TABLE status (id INTEGER PRIMARY KEY, flags VARCHAR(50))')
+        self.autosave() #commit if needed
 
     def deletemessagelist(self):
-        if not self.isnewfolder():
-            self.cursor.close()
-            self.connection.close()
-            os.unlink(self.dbfilename)
+        """delete all messages in the db"""
+        self.cursor.execute('DELETE FROM status')
 
     def cachemessagelist(self):
-        return
-
-    def autosave(self):
-        if self.doautosave:
-            self.save()
-
-    def save(self):
-        self.connection.commit()
-
-    def getmessagelist(self):
-        if self.isnewfolder():
-            self.messagelist = {}
-            return
-
         self.messagelist = {}
         self.cursor.execute('SELECT id,flags from status')
         for row in self.cursor:
             flags = [x for x in row[1]]
             self.messagelist[row[0]] = {'uid': row[0], 'flags': flags}
 
+    def save(self):
+        self.connection.commit()
+
+    def getmessagelist(self):
         return self.messagelist
 
     def uidexists(self,uid):
@@ -186,9 +145,6 @@ class LocalStatusFolder(BaseFolder):
         flags = ''.join(flags)
         self.cursor.execute('UPDATE status SET flags=? WHERE id=?',(flags,uid))
         self.autosave()
-
-    def deletemessage(self, uid):
-        self.deletemessages([uid])
 
     def deletemessages(self, uidlist):
         # Weed out ones not in self.messagelist
