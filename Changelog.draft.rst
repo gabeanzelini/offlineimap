@@ -13,6 +13,10 @@ others.
 New Features
 ------------
 
+* optional: experimental SQLite-based backend for the LocalStatus
+  cache. Plain text remains the default. Enable by setting
+  status_backend=sqlite in the local [Repository ...] section
+
 Changes
 -------
 
@@ -30,11 +34,3 @@ Pending for the next major release
 
 * UIs get shorter and nicer names. (API changing)
 * Implement IDLE feature. (delayed until next major release)
-
-
-Stalled
-=======
-
-* Learn Sqlite support.
-    Stalled: it would need to learn the ability to choose between the current
-    format and SQL to help testing the long term.
