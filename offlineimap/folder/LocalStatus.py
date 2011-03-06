@@ -29,7 +29,6 @@ class LocalStatusFolder(BaseFolder):
         self.sep = '.'
         self.config = config
         self.dofsync = config.getdefaultboolean("general", "fsync", True)
-        self.filename = os.path.join(root, name)
         self.filename = repository.getfolderfilename(name)
         self.messagelist = None
         self.repository = repository
@@ -119,6 +118,7 @@ class LocalStatusFolder(BaseFolder):
         if uid < 0:
             # We cannot assign a uid.
             return uid
+            #TODO: what to do in case uid==0?
 
         if uid in self.messagelist:     # already have it
             self.savemessageflags(uid, flags)
