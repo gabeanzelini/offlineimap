@@ -230,9 +230,14 @@ class IMAPServer:
                                 #self.password = None
 
                         if not self.gssapi:
-                            if 'AUTH=CRAM-MD5' in imapobj.capabilities:
+                            #try STARTTLS, then CRAM-MD5, then Plaintext
+                            if 'STARTTLS' in imapobj.capabilities and not self.usessl:
                                 self.ui.debug('imap',
-                                                       'Attempting CRAM-MD5 authentication')
+                                              'Attempting STARTTLS authentication')
+                                imapobj.starttls()
+                            elif 'AUTH=CRAM-MD5' in imapobj.capabilities:
+                                self.ui.debug('imap',
+                                              'Attempting CRAM-MD5 authentication')
                                 try:
                                     imapobj.authenticate('CRAM-MD5', self.md5handler)
                                 except imapobj.error, val:
