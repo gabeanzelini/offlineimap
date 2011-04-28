@@ -215,7 +215,12 @@ class IMAPFolder(BaseFolder):
             initialresult = imapobj.uid('fetch', '%d' % uid, '(BODY.PEEK[])')
             self.ui.debug('imap', 'Returned object from fetching %d: %s' % \
                      (uid, str(initialresult)))
-            return initialresult[1][0][1].replace("\r\n", "\n")
+	    first = initialresult[1]
+            second = first[0]
+            if second is None:
+              return ""
+            third = second[1]
+            return third.replace("\r\n", "\n")
                 
         finally:
             self.imapserver.releaseconnection(imapobj)
